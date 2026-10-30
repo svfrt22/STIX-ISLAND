@@ -37,6 +37,7 @@ final class IslandWindowController {
     private var closeWork: DispatchWorkItem?
     private var dragChangeCount = NSPasteboard(name: .drag).changeCount
     private var observer: NSObjectProtocol?
+    private var defaultsObserver: NSObjectProtocol?
 
     init(model: IslandModel) {
         self.model = model
@@ -52,6 +53,38 @@ final class IslandWindowController {
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
             self?.reposition()
+        }
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.applyEnabled()
+        }
+        applyEnabled()
+    }
+
+    private var isShown = true
+
+    private func applyEnabled() {
+        let enabled = Prefs.islandEnabled
+        guard enabled != isShown else { return }
+        isShown = enabled
+        if enabled {
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.25
+                panel.animator().alphaValue = 1
+            }
+        } else {
+            model.close()
+            model.transient = nil
+            panel.ignoresMouseEvents = true
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.2
+                panel.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                if self?.isShown == false { self?.panel.orderOut(nil) }
+            })
         }
     }
 
@@ -142,6 +175,7 @@ final class IslandWindowController {
     }
 
     private func update(mouse p: NSPoint) {
+        guard isShown else { return }
         var rect = islandRect()
         if model.isDraggingFile && !model.isOpen {
             rect = rect.insetBy(dx: -40, dy: -30)

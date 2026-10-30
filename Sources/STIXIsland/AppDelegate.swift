@@ -5,13 +5,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let timer = TimerModel()
     private lazy var model = IslandModel(player: player, timer: timer)
     private var windowController: IslandWindowController?
-    private let settings = SettingsWindowController()
+    private let settings = MainWindowController()
     private let battery = BatteryService()
     private let volume = VolumeControl()
     private lazy var mediaKeys = MediaKeyService(volume: volume)
     private let bluetooth = BluetoothService()
     private let brightnessWatcher = BrightnessWatcher()
     private var statusItem: NSStatusItem?
+
+    private var launchedAsLoginItem = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if let event = NSAppleEventManager.shared().currentAppleEvent,
+           event.eventID == 0x6F61_7070, // 'oapp'
+           event.paramDescriptor(forKeyword: 0x7072_6474)?.enumCodeValue == 0x6C67_6974 { // 'prdt' == 'lgit'
+            launchedAsLoginItem = true
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
@@ -64,10 +74,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
 
+        setupMainMenu()
+
         if !UserDefaults.standard.bool(forKey: PrefKey.didOnboard) {
             UserDefaults.standard.set(true, forKey: PrefKey.didOnboard)
             settings.show()
-            if !AXIsProcessTrusted() { SettingsView.requestAccessibility() }
+            if !AXIsProcessTrusted() { Permissions.requestAccessibility() }
+        } else if !launchedAsLoginItem {
+            settings.show()
         }
     }
 
@@ -86,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "capsule.fill", accessibilityDescription: "STIX Island")
         item.button?.image?.isTemplate = true
         let menu = NSMenu()
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Open STIX Island…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
         menu.addItem(.separator())
@@ -94,6 +108,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quit)
         item.menu = menu
         statusItem = item
+    }
+
+    private func setupMainMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About STIX Island",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide STIX Island", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit STIX Island", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+
+        let windowItem = NSMenuItem()
+        main.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowItem.submenu = windowMenu
+        NSApp.mainMenu = main
     }
 
     @objc private func openSettings() {

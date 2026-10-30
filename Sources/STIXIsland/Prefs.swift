@@ -1,6 +1,7 @@
 import Foundation
 
 enum PrefKey {
+    static let islandEnabled = "islandEnabled"
     static let openOnHover = "openOnHover"
     static let showCharging = "showCharging"
     static let showHeadphones = "showHeadphones"
@@ -11,6 +12,7 @@ enum PrefKey {
 enum Prefs {
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
+            PrefKey.islandEnabled: true,
             PrefKey.openOnHover: true,
             PrefKey.showCharging: true,
             PrefKey.showHeadphones: true,
@@ -19,6 +21,7 @@ enum Prefs {
         ])
     }
 
+    static var islandEnabled: Bool { UserDefaults.standard.bool(forKey: PrefKey.islandEnabled) }
     static var openOnHover: Bool { UserDefaults.standard.bool(forKey: PrefKey.openOnHover) }
     static var showCharging: Bool { UserDefaults.standard.bool(forKey: PrefKey.showCharging) }
     static var showHeadphones: Bool { UserDefaults.standard.bool(forKey: PrefKey.showHeadphones) }

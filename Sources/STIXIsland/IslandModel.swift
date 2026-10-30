@@ -97,6 +97,7 @@ final class IslandModel: ObservableObject {
     }
 
     func showTransient(_ kind: TransientKind, duration: TimeInterval = 2.2) {
+        guard Prefs.islandEnabled else { return }
         transientWork?.cancel()
         if transient != kind {
             withAnimation(Self.spring) { transient = kind }

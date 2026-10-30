@@ -238,7 +238,7 @@ final class MediaKeyService {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return pass
         }
-        guard Prefs.replaceHUD, type.rawValue == 14,
+        guard Prefs.replaceHUD, Prefs.islandEnabled, type.rawValue == 14,
               let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8
         else { return pass }
 
