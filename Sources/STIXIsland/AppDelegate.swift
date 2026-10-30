@@ -61,6 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Launching the app again (Finder, Launchpad, Spotlight) opens Settings.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settings.show()
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         player.stop()
     }
