@@ -57,6 +57,8 @@ struct IslandView: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var player: NowPlayingService
     @ObservedObject var timer: TimerModel
+    @Namespace private var ns
+    @GestureState private var pressed = false
 
     var body: some View {
         let size = model.currentSize
@@ -70,8 +72,14 @@ struct IslandView: View {
         .frame(width: size.width, height: size.height)
         .clipShape(shape)
         .shadow(color: .black.opacity(open ? 0.4 : 0), radius: open ? 14 : 0, y: open ? 5 : 0)
+        // iPhone-like "squish" when the closed island is pressed.
+        .scaleEffect(pressed && !open ? 0.94 : 1, anchor: .top)
+        .animation(.spring(response: 0.22, dampingFraction: 0.6), value: pressed)
         .opacity(model.idleHidden ? 0 : 1)
         .contentShape(shape)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0).updating($pressed) { _, state, _ in state = true }
+        )
         .onTapGesture {
             if !model.isOpen { model.open() }
         }
@@ -87,42 +95,126 @@ struct IslandView: View {
         if model.isOpen {
             if model.isDraggingFile || model.isDropTargeted {
                 DropZoneView(model: model)
-                    .transition(.opacity)
+                    .transition(.islandExpanded)
             } else {
-                ExpandedView(model: model, player: player, timer: timer)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
-                            .animation(.easeOut(duration: 0.24).delay(0.06)),
-                        removal: .opacity.animation(.easeIn(duration: 0.1))
-                    ))
+                ExpandedView(model: model, player: player, timer: timer, ns: ns)
+                    .transition(.islandExpanded)
             }
         } else if let t = model.transient {
             CompactRow(model: model, side: IslandModel.transientSide) {
                 TransientLeading(kind: t)
+                    .transition(.islandCompact(edge: .leading))
             } trailing: {
                 TransientTrailing(kind: t)
+                    .transition(.islandCompact(edge: .trailing))
             }
-            .transition(.opacity)
-            .id("transient")
+            .id(t.groupID)
         } else if timer.isActive {
             CompactRow(model: model, side: model.compactSide) {
-                Image(systemName: "timer").font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange)
+                Image(systemName: "timer")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !timer.isRunning)
+                    .transition(.islandCompact(edge: .leading))
             } trailing: {
                 Text(timer.display)
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.orange)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                    .contentTransition(.numericText(countsDown: true))
+                    .animation(.snappy, value: timer.display)
+                    .transition(.islandCompact(edge: .trailing))
             }
-            .transition(.opacity)
         } else if model.showsMusicCompact {
             CompactRow(model: model, side: model.compactSide) {
                 ArtworkView(image: player.artwork, size: model.notchSize.height - 10, radius: 6)
+                    .matchedGeometryEffect(id: "artwork", in: ns)
+                    .transition(.islandCompact(edge: .leading))
             } trailing: {
                 Waveform(color: player.accent, playing: player.isPlaying)
                     .frame(width: 18, height: 14)
+                    .matchedGeometryEffect(id: "waveform", in: ns)
+                    .transition(.islandCompact(edge: .trailing))
             }
-            .transition(.opacity)
+        }
+    }
+}
+
+// MARK: - Transitions (blur + scale, like the iPhone Dynamic Island)
+
+struct BlurScaleFade: ViewModifier {
+    let blur: CGFloat
+    let scale: CGFloat
+    let opacity: Double
+    let anchor: UnitPoint
+    var offsetX: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: blur)
+            .scaleEffect(scale, anchor: anchor)
+            .offset(x: offsetX)
+            .opacity(opacity)
+    }
+}
+
+extension AnyTransition {
+    /// Content of the open island: blooms out of the notch, blurs away on close.
+    static var islandExpanded: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: BlurScaleFade(blur: 12, scale: 0.86, opacity: 0, anchor: .top),
+                identity: BlurScaleFade(blur: 0, scale: 1, opacity: 1, anchor: .top)
+            ).animation(.spring(response: 0.42, dampingFraction: 0.86).delay(0.03)),
+            removal: .modifier(
+                active: BlurScaleFade(blur: 8, scale: 0.92, opacity: 0, anchor: .top),
+                identity: BlurScaleFade(blur: 0, scale: 1, opacity: 1, anchor: .top)
+            ).animation(.easeIn(duration: 0.14))
+        )
+    }
+
+    /// Leading / trailing items of the closed island slide out from behind the notch.
+    static func islandCompact(edge: HorizontalEdge) -> AnyTransition {
+        let dx: CGFloat = edge == .leading ? 14 : -14
+        return .asymmetric(
+            insertion: .modifier(
+                active: BlurScaleFade(blur: 6, scale: 0.6, opacity: 0, anchor: .center, offsetX: dx),
+                identity: BlurScaleFade(blur: 0, scale: 1, opacity: 1, anchor: .center)
+            ).animation(.spring(response: 0.38, dampingFraction: 0.8).delay(0.05)),
+            removal: .modifier(
+                active: BlurScaleFade(blur: 6, scale: 0.7, opacity: 0, anchor: .center, offsetX: dx),
+                identity: BlurScaleFade(blur: 0, scale: 1, opacity: 1, anchor: .center)
+            ).animation(.easeIn(duration: 0.12))
+        )
+    }
+}
+
+extension AnyTransition {
+    static var pageSwap: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: BlurScaleFade(blur: 8, scale: 0.94, opacity: 0, anchor: .center),
+                identity: BlurScaleFade(blur: 0, scale: 1, opacity: 1, anchor: .center)
+            ).animation(.spring(response: 0.36, dampingFraction: 0.86)),
+            removal: .modifier(
+                active: BlurScaleFade(blur: 8, scale: 1.04, opacity: 0, anchor: .center),
+                identity: BlurScaleFade(blur: 0, scale: 1, opacity: 1, anchor: .center)
+            ).animation(.easeIn(duration: 0.12))
+        )
+    }
+}
+
+extension TransientKind {
+    /// Same group = same view identity, so repeated volume presses update in place.
+    var groupID: String {
+        switch self {
+        case .charging: return "charging"
+        case .volume: return "volume"
+        case .brightness: return "brightness"
+        case .headphones: return "headphones"
+        case .timerDone: return "timerDone"
+        case .lowBattery: return "lowBattery"
         }
     }
 }
@@ -151,33 +243,45 @@ struct CompactRow<Leading: View, Trailing: View>: View {
 
 struct TransientLeading: View {
     let kind: TransientKind
+    @State private var appeared = 0
 
     var body: some View {
         Group {
             switch kind {
             case .charging:
-                Image(systemName: "bolt.fill").foregroundStyle(.green)
+                Text("Charging")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             case let .volume(level, muted):
-                Image(systemName: Self.speaker(level, muted)).foregroundStyle(.white)
-            case .brightness:
-                Image(systemName: "sun.max.fill").foregroundStyle(.white)
+                Image(systemName: muted || level == 0 ? "speaker.slash.fill" : "speaker.wave.3.fill",
+                      variableValue: Double(level))
+                    .foregroundStyle(.white)
+                    .contentTransition(.symbolEffect(.replace))
+            case let .brightness(level):
+                Image(systemName: "sun.max.fill", variableValue: Double(level))
+                    .foregroundStyle(.white)
             case let .headphones(symbol, _, connected):
-                Image(systemName: symbol).foregroundStyle(connected ? Color.white : Color.gray)
+                Image(systemName: symbol)
+                    .foregroundStyle(connected ? Color.white : Color.gray)
+                    .symbolEffect(.bounce, value: appeared)
             case .timerDone:
-                Image(systemName: "timer").foregroundStyle(.orange)
+                Image(systemName: "timer")
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.bounce, options: .repeat(3), value: appeared)
             case .lowBattery:
-                Image(systemName: "battery.25percent").foregroundStyle(.red)
+                Text("Low Battery")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
         }
         .font(.system(size: 14, weight: .semibold))
-        .contentTransition(.symbolEffect(.replace))
-    }
-
-    static func speaker(_ level: Float, _ muted: Bool) -> String {
-        if muted || level == 0 { return "speaker.slash.fill" }
-        if level < 0.34 { return "speaker.wave.1.fill" }
-        if level < 0.67 { return "speaker.wave.2.fill" }
-        return "speaker.wave.3.fill"
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { appeared += 1 }
+        }
     }
 }
 
@@ -189,7 +293,7 @@ struct TransientTrailing: View {
         case let .charging(level, _):
             HStack(spacing: 4) {
                 Text("\(level)%").font(.system(size: 12, weight: .semibold).monospacedDigit())
-                Image(systemName: Self.batterySymbol(level)).font(.system(size: 13))
+                BatteryGlyph(level: level, color: .green, charging: true)
             }
             .foregroundStyle(.green)
         case let .volume(level, muted):
@@ -198,30 +302,77 @@ struct TransientTrailing: View {
             LevelBar(value: Double(level))
         case let .headphones(_, battery, connected):
             if connected, let battery {
-                HStack(spacing: 3) {
-                    Text("\(battery)%").font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    Image(systemName: Self.batterySymbol(battery)).font(.system(size: 12))
-                }
-                .foregroundStyle(battery <= 20 ? Color.red : Color.green)
+                BatteryRing(level: battery)
             } else {
                 Image(systemName: connected ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(connected ? Color.green : Color.gray)
             }
         case .timerDone:
             Text("Done").font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
         case let .lowBattery(level):
-            Text("\(level)%").font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(.red)
+            HStack(spacing: 4) {
+                Text("\(level)%").font(.system(size: 12, weight: .semibold).monospacedDigit())
+                BatteryGlyph(level: level, color: .red, charging: false)
+            }
+            .foregroundStyle(.red)
         }
     }
+}
 
-    static func batterySymbol(_ level: Int) -> String {
-        switch level {
-        case ..<13: return "battery.0percent"
-        case ..<38: return "battery.25percent"
-        case ..<63: return "battery.50percent"
-        case ..<88: return "battery.75percent"
-        default: return "battery.100percent"
+/// iOS-style battery: outlined body whose fill grows in with a spring.
+struct BatteryGlyph: View {
+    let level: Int
+    let color: Color
+    let charging: Bool
+    @State private var shown: CGFloat = 0
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(color)
+                    .frame(width: max(2, 19 * shown))
+                    .padding(1.5)
+                if charging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 7, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(width: 22, height: 11)
+            RoundedRectangle(cornerRadius: 1).fill(Color.white.opacity(0.35)).frame(width: 1.5, height: 4)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.15)) {
+                shown = CGFloat(max(0, min(100, level))) / 100
+            }
+        }
+    }
+}
+
+/// AirPods-style battery ring that fills in on appear.
+struct BatteryRing: View {
+    let level: Int
+    @State private var shown: CGFloat = 0
+
+    var body: some View {
+        let color: Color = level <= 20 ? .red : .green
+        ZStack {
+            Circle().stroke(color.opacity(0.25), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: shown)
+                .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 17, height: 17)
+        .onAppear {
+            withAnimation(.spring(response: 0.7, dampingFraction: 0.85).delay(0.15)) {
+                shown = CGFloat(max(0, min(100, level))) / 100
+            }
         }
     }
 }
@@ -238,7 +389,7 @@ struct LevelBar: View {
             }
         }
         .frame(width: 52, height: 5)
-        .animation(.easeOut(duration: 0.12), value: value)
+        .animation(.spring(response: 0.25, dampingFraction: 0.9), value: value)
     }
 }
 
@@ -248,23 +399,29 @@ struct ExpandedView: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var player: NowPlayingService
     @ObservedObject var timer: TimerModel
+    let ns: Namespace.ID
+    @Namespace private var tabNS
 
     var body: some View {
         VStack(spacing: 0) {
             // Top row sits beside the physical notch.
             HStack(spacing: 6) {
-                TabIcon(symbol: "music.note", selected: model.page == .music) { model.page = .music }
-                TabIcon(symbol: "timer", selected: model.page == .timer) { model.page = .timer }
+                TabIcon(symbol: "music.note", selected: model.page == .music, ns: tabNS) { select(.music) }
+                TabIcon(symbol: "timer", selected: model.page == .timer, ns: tabNS) { select(.timer) }
                 Spacer()
-                TabIcon(symbol: "gearshape.fill", selected: false) { model.openSettings?() }
+                TabIcon(symbol: "gearshape.fill", selected: false, ns: tabNS) { model.openSettings?() }
             }
             .padding(.horizontal, 26)
             .frame(height: model.notchSize.height)
 
             Group {
                 switch model.page {
-                case .music: MusicCard(player: player)
-                case .timer: TimerCard(timer: timer)
+                case .music:
+                    MusicCard(player: player, ns: ns)
+                        .transition(.pageSwap)
+                case .timer:
+                    TimerCard(timer: timer)
+                        .transition(.pageSwap)
                 }
             }
             .padding(.horizontal, 30)
@@ -272,11 +429,16 @@ struct ExpandedView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
     }
+    private func select(_ page: IslandPage) {
+        guard model.page != page else { return }
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { model.page = page }
+    }
 }
 
 struct TabIcon: View {
     let symbol: String
     let selected: Bool
+    let ns: Namespace.ID
     let action: () -> Void
     @State private var hover = false
 
@@ -286,7 +448,12 @@ struct TabIcon: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(selected ? Color.white : Color.white.opacity(hover ? 0.75 : 0.4))
                 .frame(width: 24, height: 20)
-                .background(Capsule().fill(Color.white.opacity(selected ? 0.16 : 0)))
+                .background {
+                    if selected {
+                        Capsule().fill(Color.white.opacity(0.16))
+                            .matchedGeometryEffect(id: "tabPill", in: ns)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
@@ -319,12 +486,17 @@ struct ArtworkView: View {
 
 struct MusicCard: View {
     @ObservedObject var player: NowPlayingService
+    let ns: Namespace.ID
     @State private var scrub: Double?
 
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 ArtworkView(image: player.artwork, size: 54, radius: 12)
+                    .matchedGeometryEffect(id: "artwork", in: ns)
+                    .scaleEffect(player.isPlaying || !player.hasTrack ? 1 : 0.9)
+                    .shadow(color: player.accent.opacity(player.isPlaying ? 0.35 : 0), radius: 10)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.7), value: player.isPlaying)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(player.hasTrack ? player.title : "Nothing playing")
                         .font(.system(size: 15, weight: .semibold))
@@ -338,6 +510,7 @@ struct MusicCard: View {
                 Spacer(minLength: 8)
                 Waveform(color: player.accent, playing: player.isPlaying)
                     .frame(width: 20, height: 16)
+                    .matchedGeometryEffect(id: "waveform", in: ns)
                     .opacity(player.hasTrack ? 1 : 0)
             }
 
@@ -413,17 +586,21 @@ struct ControlButton: View {
     let symbol: String
     let size: CGFloat
     let action: () -> Void
-    @State private var pressed = false
+    @State private var taps = 0
     @State private var hover = false
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            taps += 1
+            action()
+        } label: {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: size + 18, height: size + 12)
                 .background(Circle().fill(Color.white.opacity(hover ? 0.1 : 0)))
-                .contentTransition(.symbolEffect(.replace))
+                .contentTransition(.symbolEffect(.replace.downUp))
+                .symbolEffect(.bounce, value: taps)
         }
         .buttonStyle(PressScaleStyle())
         .onHover { hover = $0 }
