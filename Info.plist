@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>STIXIsland</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.stix.island</string>
+	<key>CFBundleName</key>
+	<string>STIX Island</string>
+	<key>CFBundleDisplayName</key>
+	<string>STIX Island</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__BUILD__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>STIX Island shows when your headphones connect and how much battery they have.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>STIX Island. Licensed under GPL-3.0. Based on Atoll and boring.notch.</string>
+</dict>
+</plist>

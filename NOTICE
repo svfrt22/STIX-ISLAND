@@ -1,0 +1,11 @@
+STIX Island - NOTICE
+
+STIX Island is free software licensed under the GNU General Public License v3.0
+(see LICENSE). It contains code and ideas derived from:
+
+- Atoll (https://github.com/Ebullioscopic/Atoll), GPL-3.0
+- boring.notch (https://github.com/TheBoredTeam/boring.notch), GPL-3.0
+
+Bundled third-party component:
+- mediaremote-adapter / MediaRemoteAdapter.framework by ungive
+  (https://github.com/ungive/mediaremote-adapter), BSD-3-Clause.
