@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var mediaKeys = MediaKeyService(volume: volume)
     private let bluetooth = BluetoothService()
     private let brightnessWatcher = BrightnessWatcher()
+    private let osd = OSDSuppressor()
+    private var defaultsObserver: NSObjectProtocol?
     private var statusItem: NSStatusItem?
 
     private var launchedAsLoginItem = false
@@ -76,10 +78,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMainMenu()
 
+        // Undo any pause left over from a previous run, then apply the setting.
+        osd.resumeNow()
+        applyOSDSuppression()
+        installTerminationSignalHandlers()
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.applyOSDSuppression()
+        }
+
         if !UserDefaults.standard.bool(forKey: PrefKey.didOnboard) {
             UserDefaults.standard.set(true, forKey: PrefKey.didOnboard)
             settings.show()
-            if !AXIsProcessTrusted() { Permissions.requestAccessibility() }
         } else if !launchedAsLoginItem {
             settings.show()
         }
@@ -91,7 +102,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    private var signalSources: [DispatchSourceSignal] = []
+
+    /// `killall` sends SIGTERM, which skips applicationWillTerminate; make sure the
+    /// system indicator comes back in that case too.
+    private func installTerminationSignalHandlers() {
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler { [weak self] in
+                self?.osd.resumeNow()
+                exit(0)
+            }
+            src.resume()
+            signalSources.append(src)
+        }
+    }
+
+    private func applyOSDSuppression() {
+        osd.setActive(Prefs.islandEnabled && Prefs.replaceHUD)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        osd.resumeNow()
         player.stop()
     }
 

@@ -97,10 +97,6 @@ struct MainView: View {
                         FieldRow(icon: "speaker.wave.2.fill", title: "Volume & brightness") {
                             PillToggle(isOn: $replaceHUD)
                         }
-                        if replaceHUD && !trusted {
-                            AccessNotice()
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
                     }
                     .disabled(!enabled)
                     .opacity(enabled ? 1 : 0.4)

@@ -11,6 +11,8 @@ final class VolumeControl {
     private var device: AudioDeviceID = 0
     private var listener: AudioObjectPropertyListenerBlock?
     private var lastReport: (Float, Bool)?
+    /// Cached so the event-tap callback never touches CoreAudio.
+    private(set) var cachedCanSet = true
 
     private static func address(_ selector: AudioObjectPropertySelector,
                                 _ scope: AudioObjectPropertyScope = kAudioDevicePropertyScopeOutput)
@@ -44,6 +46,7 @@ final class VolumeControl {
         guard let dev = Self.defaultDevice() else { return }
         device = dev
         lastReport = current()
+        cachedCanSet = canSet
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self, let now = self.current() else { return }
             if let last = self.lastReport, abs(last.0 - now.0) < 0.001, last.1 == now.1 { return }
@@ -197,6 +200,8 @@ final class MediaKeyService {
     private var tap: CFMachPort?
     private var retry: Timer?
 
+    private let brightnessAvailable = Brightness.available
+
     init(volume: VolumeControl) {
         self.volume = volume
     }
@@ -220,10 +225,15 @@ final class MediaKeyService {
             let svc = Unmanaged<MediaKeyService>.fromOpaque(refcon).takeUnretainedValue()
             return svc.handle(type: type, event: event)
         }
-        guard let t = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-            eventsOfInterest: mask, callback: callback, userInfo: ctx
-        ) else { return }
+        var created: CFMachPort?
+        for location in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
+            if let t = CGEvent.tapCreate(tap: location, place: .headInsertEventTap, options: .defaultTap,
+                                         eventsOfInterest: mask, callback: callback, userInfo: ctx) {
+                created = t
+                break
+            }
+        }
+        guard let t = created else { return }
         tap = t
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, t, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
@@ -250,25 +260,111 @@ final class MediaKeyService {
 
         switch keyCode {
         case 0, 1, 7: // sound up, sound down, mute
-            guard volume.canSet else { return pass }
+            guard volume.cachedCanSet else { return pass }
             if isDown {
-                let r: (Float, Bool)
-                if keyCode == 7 {
-                    r = volume.toggleMute()
-                } else {
-                    r = volume.step(up: keyCode == 0, fine: fine)
+                DispatchQueue.main.async {
+                    let r = keyCode == 7 ? self.volume.toggleMute() : self.volume.step(up: keyCode == 0, fine: fine)
+                    self.onVolume?(r.0, r.1)
                 }
-                DispatchQueue.main.async { self.onVolume?(r.0, r.1) }
             }
             return nil
         case 2, 3: // brightness up, down
-            guard Brightness.available else { return pass }
-            if isDown, let v = Brightness.step(up: keyCode == 2, fine: fine) {
-                DispatchQueue.main.async { self.onBrightness?(v) }
+            guard brightnessAvailable else { return pass }
+            if isDown {
+                DispatchQueue.main.async {
+                    if let v = Brightness.step(up: keyCode == 2, fine: fine) { self.onBrightness?(v) }
+                }
             }
             return nil
         default:
             return pass
         }
+    }
+}
+
+// MARK: - System OSD suppression
+
+/// Pauses Apple's OSDUIHelper (the process that draws the volume/brightness
+/// bezel) so only the island shows those changes. Resumed on quit or when the
+/// feature is turned off.
+final class OSDSuppressor {
+    private let queue = DispatchQueue(label: "stix.osd")
+    private var timer: DispatchSourceTimer?
+    private var stoppedPID: pid_t?
+    private(set) var active = false
+
+    func setActive(_ on: Bool) {
+        queue.async {
+            guard on != self.active else { return }
+            self.active = on
+            if on {
+                self.ensureStopped(launchIfNeeded: true)
+                let t = DispatchSource.makeTimerSource(queue: self.queue)
+                t.schedule(deadline: .now() + 2, repeating: 2)
+                t.setEventHandler { [weak self] in self?.ensureStopped(launchIfNeeded: false) }
+                t.resume()
+                self.timer = t
+            } else {
+                self.timer?.cancel()
+                self.timer = nil
+                self.resumeAll()
+            }
+        }
+    }
+
+    /// Synchronous resume used on app termination.
+    func resumeNow() {
+        queue.sync {
+            self.active = false
+            self.timer?.cancel()
+            self.timer = nil
+            self.resumeAll()
+        }
+    }
+
+    private func ensureStopped(launchIfNeeded: Bool) {
+        guard active else { return }
+        var pid = Self.helperPID()
+        if pid == nil && launchIfNeeded {
+            Self.run("/bin/launchctl", ["kickstart", "gui/\(getuid())/com.apple.OSDUIHelper"])
+            for _ in 0..<20 where pid == nil {
+                usleep(150_000)
+                pid = Self.helperPID()
+            }
+        }
+        guard let pid else { return }
+        if pid != stoppedPID || !Self.isStopped(pid) {
+            kill(pid, SIGSTOP)
+            stoppedPID = pid
+        }
+    }
+
+    private func resumeAll() {
+        if let pid = Self.helperPID() { kill(pid, SIGCONT) }
+        if let old = stoppedPID { kill(old, SIGCONT) }
+        stoppedPID = nil
+    }
+
+    private static func helperPID() -> pid_t? {
+        let out = run("/usr/bin/pgrep", ["-x", "OSDUIHelper"])
+        return out.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }.first
+    }
+
+    private static func isStopped(_ pid: pid_t) -> Bool {
+        run("/bin/ps", ["-o", "state=", "-p", "\(pid)"]).hasPrefix("T")
+    }
+
+    @discardableResult
+    private static func run(_ path: String, _ args: [String]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
