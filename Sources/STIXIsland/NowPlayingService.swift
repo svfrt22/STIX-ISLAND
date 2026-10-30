@@ -120,7 +120,8 @@ final class NowPlayingService: ObservableObject {
             lastArtworkKey = artKey
             if let artString,
                let data = Data(base64Encoded: artString.trimmingCharacters(in: .whitespacesAndNewlines)),
-               let img = NSImage(data: data) {
+               let original = NSImage(data: data) {
+                let img = Self.downscaled(original, to: 160)
                 newArtwork = .some(img)
                 newAccent = Color(nsColor: Self.accentColor(of: img))
             } else {
@@ -181,6 +182,26 @@ final class NowPlayingService: ObservableObject {
         elapsedAnchor = t
         anchorDate = Date()
         setElapsedFn?(t)
+    }
+
+    // MARK: Artwork helpers
+
+    /// Small copy of the artwork so animations never redraw a huge bitmap.
+    static func downscaled(_ image: NSImage, to side: CGFloat) -> NSImage {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let px = Int(side * 2)
+        guard let ctx = CGContext(
+            data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.interpolationQuality = .high
+        // Aspect-fill into a square.
+        let w = CGFloat(cg.width), h = CGFloat(cg.height)
+        let scale = max(CGFloat(px) / w, CGFloat(px) / h)
+        let dw = w * scale, dh = h * scale
+        ctx.draw(cg, in: CGRect(x: (CGFloat(px) - dw) / 2, y: (CGFloat(px) - dh) / 2, width: dw, height: dh))
+        guard let out = ctx.makeImage() else { return image }
+        return NSImage(cgImage: out, size: NSSize(width: side, height: side))
     }
 
     // MARK: Accent color

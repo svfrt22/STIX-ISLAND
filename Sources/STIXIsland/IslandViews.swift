@@ -69,7 +69,7 @@ struct IslandView: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(shape)
-        .shadow(color: .black.opacity(open ? 0.45 : 0), radius: 16, y: 6)
+        .shadow(color: .black.opacity(open ? 0.4 : 0), radius: open ? 14 : 0, y: open ? 5 : 0)
         .opacity(model.idleHidden ? 0 : 1)
         .contentShape(shape)
         .onTapGesture {
@@ -78,8 +78,7 @@ struct IslandView: View {
         .onDrop(of: [UTType.fileURL], isTargeted: $model.isDropTargeted) { providers in
             model.handleDrop(providers)
         }
-        .animation(IslandModel.spring, value: size)
-        .animation(IslandModel.spring, value: open)
+        .animation(open ? IslandModel.spring : IslandModel.closeSpring, value: size)
         .preferredColorScheme(.dark)
     }
 
@@ -91,7 +90,11 @@ struct IslandView: View {
                     .transition(.opacity)
             } else {
                 ExpandedView(model: model, player: player, timer: timer)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
+                            .animation(.easeOut(duration: 0.24).delay(0.06)),
+                        removal: .opacity.animation(.easeIn(duration: 0.1))
+                    ))
             }
         } else if let t = model.transient {
             CompactRow(model: model, side: IslandModel.transientSide) {
@@ -162,6 +165,8 @@ struct TransientLeading: View {
                 Image(systemName: symbol).foregroundStyle(connected ? Color.white : Color.gray)
             case .timerDone:
                 Image(systemName: "timer").foregroundStyle(.orange)
+            case .lowBattery:
+                Image(systemName: "battery.25percent").foregroundStyle(.red)
             }
         }
         .font(.system(size: 14, weight: .semibold))
@@ -205,6 +210,8 @@ struct TransientTrailing: View {
             }
         case .timerDone:
             Text("Done").font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
+        case let .lowBattery(level):
+            Text("\(level)%").font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(.red)
         }
     }
 
@@ -334,7 +341,7 @@ struct MusicCard: View {
                     .opacity(player.hasTrack ? 1 : 0)
             }
 
-            TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+            TimelineView(.periodic(from: .now, by: 0.25)) { ctx in
                 let elapsed = scrub.map { $0 * player.duration } ?? player.elapsed(at: ctx.date)
                 HStack(spacing: 10) {
                     Text(Self.format(elapsed))

@@ -4,6 +4,10 @@ import IOKit.ps
 final class BatteryService {
     /// level (0-100), isCharging
     var onPluggedIn: ((Int, Bool) -> Void)?
+    /// Fired once when the battery drops to 20%, 10% and 5% while unplugged.
+    var onLow: ((Int) -> Void)?
+    private var lastLevel: Int?
+    private let lowThresholds = [20, 10, 5]
 
     private var source: CFRunLoopSource?
     private var lastOnAC: Bool?
@@ -15,7 +19,9 @@ final class BatteryService {
     }
 
     func start() {
-        lastOnAC = Self.read()?.onAC
+        let first = Self.read()
+        lastOnAC = first?.onAC
+        lastLevel = first?.level
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         let callback: IOPowerSourceCallbackType = { ctx in
             guard let ctx else { return }
@@ -33,7 +39,13 @@ final class BatteryService {
         if r.onAC, lastOnAC == false {
             onPluggedIn?(r.level, r.charging)
         }
+        if !r.onAC, let last = lastLevel,
+           let hit = lowThresholds.first(where: { r.level <= $0 && last > $0 }) {
+            _ = hit
+            onLow?(r.level)
+        }
         lastOnAC = r.onAC
+        lastLevel = r.level
     }
 
     static func read() -> Reading? {

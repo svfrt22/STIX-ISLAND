@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let volume = VolumeControl()
     private lazy var mediaKeys = MediaKeyService(volume: volume)
     private let bluetooth = BluetoothService()
+    private let brightnessWatcher = BrightnessWatcher()
     private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -29,7 +30,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard Prefs.showCharging else { return }
             self?.model.showTransient(.charging(level: level, charging: charging), duration: 2.8)
         }
+        battery.onLow = { [weak self] level in
+            self?.model.showTransient(.lowBattery(level: level), duration: 4)
+        }
         battery.start()
+
+        brightnessWatcher.onChange = { [weak self] level in
+            guard Prefs.replaceHUD else { return }
+            self?.model.showTransient(.brightness(level: level))
+        }
+        brightnessWatcher.start()
 
         volume.onChange = { [weak self] level, muted in
             guard Prefs.replaceHUD else { return }

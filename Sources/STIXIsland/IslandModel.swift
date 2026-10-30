@@ -14,10 +14,14 @@ enum TransientKind: Equatable {
     case brightness(level: Float)
     case headphones(symbol: String, battery: Int?, connected: Bool)
     case timerDone
+    case lowBattery(level: Int)
 }
 
 final class IslandModel: ObservableObject {
-    static let spring = Animation.spring(response: 0.42, dampingFraction: 0.8)
+    /// Opening: a gentle, Apple-like spring with a hint of bounce.
+    static let spring = Animation.spring(response: 0.38, dampingFraction: 0.78)
+    /// Closing: critically damped, so nothing wobbles or hangs.
+    static let closeSpring = Animation.spring(response: 0.3, dampingFraction: 1.0)
 
     @Published var isOpen = false
     @Published var page: IslandPage = .music
@@ -89,7 +93,7 @@ final class IslandModel: ObservableObject {
 
     func close() {
         guard isOpen else { return }
-        withAnimation(Self.spring) { isOpen = false }
+        withAnimation(Self.closeSpring) { isOpen = false }
     }
 
     func showTransient(_ kind: TransientKind, duration: TimeInterval = 2.2) {
@@ -98,7 +102,7 @@ final class IslandModel: ObservableObject {
             withAnimation(Self.spring) { transient = kind }
         }
         let work = DispatchWorkItem { [weak self] in
-            withAnimation(IslandModel.spring) { self?.transient = nil }
+            withAnimation(IslandModel.closeSpring) { self?.transient = nil }
         }
         transientWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)

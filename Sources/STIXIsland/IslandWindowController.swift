@@ -181,7 +181,7 @@ final class IslandWindowController {
                 }
             }
             closeWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
         }
     }
 }

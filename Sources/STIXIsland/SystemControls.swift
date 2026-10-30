@@ -164,6 +164,29 @@ enum Brightness {
     }
 }
 
+/// Watches the built-in display brightness so changes made by any means
+/// (keys, Control Center, Touch Bar) show up in the island.
+final class BrightnessWatcher {
+    var onChange: ((Float) -> Void)?
+    private var timer: Timer?
+    private var last: Float?
+
+    func start() {
+        last = Brightness.get()
+        let t = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in self?.poll() }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func poll() {
+        guard let now = Brightness.get() else { return }
+        defer { last = now }
+        guard let last else { return }
+        // Key presses move in ~6% steps; auto-brightness drifts slowly and is ignored.
+        if abs(now - last) >= 0.012 { onChange?(now) }
+    }
+}
+
 // MARK: - Media key interception (needs Accessibility)
 
 final class MediaKeyService {
